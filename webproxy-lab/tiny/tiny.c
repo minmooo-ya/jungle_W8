@@ -18,7 +18,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs);
 // 요청 URI를 분석하여 정적 or 동적 콘텐츠 판단하고
 // filename과 CGI 인자를 분리해서 저장
 
-void serve_static(int fd, char *filename, int filesize);  
+void serve_static(int fd, char *filename, int filesize, char *method);  
 // 정적 콘텐츠 (예: HTML, 이미지)를 클라이언트에 전송하는 함수
 
 void get_filetype(char *filename, char *filetype);  
@@ -101,9 +101,16 @@ void doit(int fd)
 
   // 요청 라인에서 메소드(GET), URI, 버전 파싱
   sscanf(buf, "%s %s %s", method, uri, version);
+  if (strstr(uri, "favicon.ico")) {
+    // *** 요청 헤더는 반드시 다 읽어줘야 함 ***
+    read_requesthdrs(&rio);  // 안 읽으면 소켓에 남은 데이터로 에러남
+    printf("Ignoring favicon.ico request\n");
+    return;
+  }
 
   // Tiny는 GET 메소드만 지원. 다른 메소드는 에러 반환
-  if (strcasecmp(method, "GET")) {
+  // 연습문제 11.11을 위해 HEAD추가
+  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) {
     clienterror(fd, method, "501", "Not implemented", 
                 "Tiny does not implement this method");
     return;
@@ -128,7 +135,7 @@ void doit(int fd)
                   "Tiny couldn't read the file");
       return;
     }
-    serve_static(fd, filename, sbuf.st_size); // 정적 파일을 클라이언트로 전송
+    serve_static(fd, filename, sbuf.st_size, method); // 정적 파일을 클라이언트로 전송
   }
   else {
     // 동적 콘텐츠: 실행 가능해야 함 (executable flag 확인)
@@ -228,7 +235,7 @@ int parse_uri(char *uri, char *filename, char *cgiargs)
   }
 }
 
-void serve_static(int fd, char *filename, int filesize)
+void serve_static(int fd, char *filename, int filesize, char *method)
 {
     int srcfd;                      // 파일 디스크립터
     char *srcp, filetype[MAXLINE]; // 파일을 메모리에 매핑할 포인터, MIME 타입 저장용
@@ -257,9 +264,23 @@ void serve_static(int fd, char *filename, int filesize)
     // 파일을 메모리에 매핑 (mmap): 빠르게 전송하기 위해 메모리에 바로 매핑
     srcp = Mmap(0, filesize, PROT_READ, MAP_PRIVATE, srcfd, 0);
     Close(srcfd); // 파일 디스크립터는 닫아도 mmap으로 접근 가능
-
-    Rio_writen(fd, srcp, filesize); // 매핑된 메모리 내용 전송 (실제 파일 데이터 전송)
+    // 연습문제 11.11
+    if (strcasecmp(method, "HEAD") != 0) {
+      Rio_writen(fd, srcp, filesize); // GET 요청일 때만 전송
+    }
     Munmap(srcp, filesize);         // 메모리 매핑 해제
+/*  
+    csapp 숙제문제 11.9 
+    malloc + rio_readn + rio_writen 사용하기
+
+    srcfd = Open(filename, O_RDONLY, 0); // 파일 열기 (읽기 전용)
+    void *bbuf = malloc(filesize);
+    rio_readn(srcfd, bbuf, filesize);
+    rio_writen(fd, bbuf, filesize);
+    Close(srcfd);
+    free(bbuf);
+*/
+
 }
 
 /*
