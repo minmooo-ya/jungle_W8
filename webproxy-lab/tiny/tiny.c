@@ -9,7 +9,7 @@
 #include "csapp.h"
 
 void doit(int fd);  
-// 클라이언트 요청을 처리하는 함수 (정적 or 동적 콘텐츠 결정 포함)
+// 클라이언트 요청을 처리하는 함수 (정적 or 동적 콘텐츠 결정 포함#include "csapp.h"
 
 void read_requesthdrs(rio_t *rp);  
 // 요청 헤더를 읽고 무시하는 함수 (헤더 라인들을 읽기만 함)
