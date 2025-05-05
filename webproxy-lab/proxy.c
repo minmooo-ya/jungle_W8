@@ -15,6 +15,7 @@ void doit(int fd);
 void read_requesthdrs(rio_t *rp);
 void parse_uri(char *uri, char *hostname, char *path, int *port);
 void clienterror(int fd, char *cause, char *errnum, char *shortmsg, char *longmsg);
+void *thread(void *vargp);
 
 int main(int argc, char **argv)
 {
@@ -32,14 +33,32 @@ int main(int argc, char **argv)
   listenfd = Open_listenfd(argv[1]); // 서버 listen 소켓 열기
 
   while (1) {
-    clientlen = sizeof(clientaddr);
-    connfd = Accept(listenfd, (SA *)&clientaddr, &clientlen); // 클라이언트 연결 수락
+    clientlen = sizeof(clientaddr);  // 클라이언트 주소 구조체 크기 설정
+  
+    int *connfdp = Malloc(sizeof(int));  // 클라이언트 연결 소켓을 저장할 메모리 동적 할당
+    *connfdp = Accept(listenfd, (SA *)&clientaddr, &clientlen);  
+    // 클라이언트 연결 요청 수락 → 연결된 소켓 파일 디스크립터를 connfdp에 저장
+  
     Getnameinfo((SA *)&clientaddr, clientlen, hostname, MAXLINE, port, MAXLINE, 0);
-    printf("Accepted connection from (%s, %s)\n", hostname, port); // 클라이언트 접속 정보 출력
-
-    doit(connfd);  // 클라이언트 요청 처리
-    Close(connfd); // 소켓 닫기
+    // 클라이언트의 IP 주소와 포트를 사람이 읽을 수 있는 문자열로 변환
+  
+    printf("Accepted connection from (%s, %s)\n", hostname, port);  
+    // 연결된 클라이언트 정보를 출력 (디버깅용)
+  
+    pthread_t tid;  
+    Pthread_create(&tid, NULL, thread, connfdp);  
+    // 새로운 스레드를 생성하여 thread 함수에서 클라이언트 요청 처리 시작
+    // connfdp는 스레드로 전달되어 처리 후 내부에서 free됨
   }
+}
+
+void *thread(void *vargp) {
+  int connfd = *((int *)vargp); // 전달받은 인자를 정수형 포인터로 변환하여 클라이언트 소켓 파일 디스크립터(connfd) 추출
+  Pthread_detach(pthread_self()); // 현재 스레드를 분리(detach) 상태로 설정 → 스레드 종료 시 자원 자동 회수 (join 불필요, 메모리 누수 방지)
+  Free(vargp);  // heap에서 할당한 인자 메모리 해제 (connfd 저장한 메모리)
+  doit(connfd); // 클라이언트 요청 처리 함수 호출
+  Close(connfd);  // 클라이언트 소켓 닫기
+  return NULL;  // 스레드 종료 (반환값 없음)
 }
 
 // 클라이언트 요청을 처리하는 함수
@@ -202,3 +221,23 @@ void read_requesthdrs(rio_t *rp) {
     // 그 외의 다른 헤더들도 현재 구현에서는 무시
   }
 }
+
+/*     병렬처리 프록시 구현에서의 흐름	
+  1.	메인 루프
+    •	Accept()로 클라이언트 요청 대기
+    •	연결되면 connfd를 동적 메모리 할당 후
+	2.	스레드 생성
+    •	pthread_create()로 새 스레드 생성
+    •	connfd를 인자로 thread() 함수에 전달
+	3.	스레드 처리 (thread() 함수)
+    •	doit(connfd) 호출해서 요청 처리
+    •	응답 완료 후 Close()
+    •	Pthread_detach()로 자원 자동 회수
+    •	Free()로 connfd 메모리 해제
+	4.	doit() 함수
+	  •	요청 파싱 → 서버에 요청 → 응답 받아 클라이언트에 전달
+  
+          생각하면 좋을 포인트들
+  •	각 요청은 별도 스레드에서 독립적으로 처리
+	•	메인 스레드는 끊임없이 Accept()만 수행
+	•	detach로 스레드 메모리 누수 방지*/
